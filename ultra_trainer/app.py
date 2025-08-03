@@ -44,7 +44,7 @@ def build_conversation_context(messages, current_prompt):
         for i, msg in enumerate(recent_messages[1:], 1):  # Skip initial greeting
             role = "User" if msg["role"] == "user" else "Coach"
             # Truncate long messages for context
-            content = msg["content"][:200] + "..." if len(msg["content"]) > 200 else msg["content"]
+            content = msg["content"][:1000] + "..." if len(msg["content"]) > 1000 else msg["content"]
             context_parts.append(f"{role}: {content}")
         
         context_parts.append("")  # Empty line separator

@@ -47,6 +47,8 @@ class AthleteProfile(Base):
     preferred_terrain = Column(String(50))
     weekly_mileage_km = Column(Float)
     ultra_experience = Column(Integer, default=0)
+    current_location = Column(String(255))
+    default_location = Column(String(255))
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
 
 
@@ -100,6 +102,30 @@ class ContextStore:
         self.engine = create_engine(db_url, echo=False)
         Base.metadata.create_all(self.engine)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        
+        # Handle database migrations
+        self._migrate_database()
+    
+    def _migrate_database(self):
+        """Handle database schema migrations."""
+        # Use raw SQL to check and add columns if they don't exist
+        try:
+            with self.engine.connect() as conn:
+                # Check if location columns exist by trying to query them
+                try:
+                    conn.execute("SELECT current_location FROM athlete_profile LIMIT 1")
+                except Exception:
+                    # Column doesn't exist, add it
+                    conn.execute("ALTER TABLE athlete_profile ADD COLUMN current_location VARCHAR(255)")
+                
+                try:
+                    conn.execute("SELECT default_location FROM athlete_profile LIMIT 1")
+                except Exception:
+                    # Column doesn't exist, add it
+                    conn.execute("ALTER TABLE athlete_profile ADD COLUMN default_location VARCHAR(255)")
+        except Exception:
+            # If there's any error (like table doesn't exist yet), ignore
+            pass
     
     def _get_session(self) -> Session:
         """Get a database session."""
@@ -117,7 +143,9 @@ class ContextStore:
         running_years: Optional[int] = None,
         preferred_terrain: Optional[str] = None,
         weekly_mileage_km: Optional[float] = None,
-        ultra_experience: Optional[int] = None
+        ultra_experience: Optional[int] = None,
+        current_location: Optional[str] = None,
+        default_location: Optional[str] = None
     ) -> None:
         """Create or update athlete profile."""
         with self._get_session() as session:
@@ -145,6 +173,10 @@ class ContextStore:
                 profile.weekly_mileage_km = weekly_mileage_km
             if ultra_experience is not None:
                 profile.ultra_experience = ultra_experience
+            if current_location is not None:
+                profile.current_location = current_location
+            if default_location is not None:
+                profile.default_location = default_location
             
             session.commit()
     
@@ -165,6 +197,8 @@ class ContextStore:
                 "preferred_terrain": profile.preferred_terrain,
                 "weekly_mileage_km": profile.weekly_mileage_km,
                 "ultra_experience": profile.ultra_experience,
+                "current_location": profile.current_location,
+                "default_location": profile.default_location,
                 "updated_at": profile.updated_at.isoformat() if profile.updated_at else None
             }
     

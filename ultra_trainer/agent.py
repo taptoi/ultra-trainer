@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from ultra_trainer.strava_mcp_server import server
 from ultra_trainer.context_store import ContextStore
+from ultra_trainer.prompts import create_agent_prompt
 
 # Load environment variables
 load_dotenv()
@@ -138,18 +139,22 @@ def profile_tool(
     running_years: Optional[int] = None,
     preferred_terrain: Optional[str] = None,
     weekly_mileage_km: Optional[float] = None,
-    ultra_experience: Optional[int] = None
+    ultra_experience: Optional[int] = None,
+    current_location: Optional[str] = None,
+    default_location: Optional[str] = None
 ) -> str:
     """
     Update or query the athlete profile.
     If no args are supplied, returns the current profile.
     Use this to remember athlete details across conversations.
+    Location fields can include city, state/province, country (e.g., "Boulder, Colorado, USA").
     """
     store = get_store()
     
     # If any parameters provided, update profile
     if any([birth_year, gender, history, weight_kg, running_years, 
-            preferred_terrain, weekly_mileage_km, ultra_experience]):
+            preferred_terrain, weekly_mileage_km, ultra_experience,
+            current_location, default_location]):
         store.upsert_profile(
             birth_year=birth_year,
             gender=gender,
@@ -158,7 +163,9 @@ def profile_tool(
             running_years=running_years,
             preferred_terrain=preferred_terrain,
             weekly_mileage_km=weekly_mileage_km,
-            ultra_experience=ultra_experience
+            ultra_experience=ultra_experience,
+            current_location=current_location,
+            default_location=default_location
         )
         return "✅ Profile updated successfully."
     
@@ -382,69 +389,17 @@ def initialize_llm() -> ChatOpenAI:
     if not api_key:
         raise ValueError("OPENAI_API_KEY environment variable is required")
     
-    return ChatOpenAI(
-        api_key=api_key,
-        model=model,
-        temperature=0.1,  # Low temperature for more consistent responses
-    )
-
-
-def create_agent_prompt() -> ChatPromptTemplate:
-    """Create the prompt template for the ultra training agent."""
-    system_message = """You are an expert ultra marathon training assistant with access to Strava activity data and persistent memory storage.
-
-Your role is to help athletes:
-- Analyze their training patterns and performance
-- Provide personalized training advice for ultra marathons
-- Track progress and identify areas for improvement
-- Suggest training plans based on current fitness and goals
-- Help with race preparation and recovery strategies
-- Remember athlete context across conversations
-
-You have access to the following data sources:
-
-STRAVA DATA (via tools):
-- Recent activities and training history
-- Detailed activity metrics (distance, time, elevation, etc.)
-- Activities within specific date ranges
-- Individual activity details
-
-PERSISTENT MEMORY (via tools):
-- Athlete profile (age, weight, experience, terrain preferences, etc.)
-- Training goals and target races
-- Injury and fatigue episodes
-- Effort and training feedback logs
-- Conversation history and context
-
-IMPORTANT MEMORY USAGE:
-- ALWAYS check conversation_context_tool at the start of conversations to understand what you know about the athlete
-- Use profile_tool to remember/update athlete details (age, experience, goals, etc.)
-- Use goals_tool to track target races and training objectives
-- Use injury_tool and fatigue_tool to monitor athlete health and recovery
-- Use effort_tool to track how training feels to the athlete
-- Store relevant information from conversations for future reference
-
-When analyzing data:
-- Focus on relevant metrics for ultra marathon training (weekly mileage, long runs, elevation gain, etc.)
-- Consider training consistency and progression
-- Look for patterns in performance and recovery
-- Provide actionable insights and recommendations
-- Remember athlete preferences and past conversations
-
-When displaying activity information:
-- ALWAYS prominently show the activity name (e.g., "Morning Run", "Long Trail Run", etc.) as the main title or header
-- Include the activity name in quotes when referring to specific activities
-- Use the activity name to provide context about the type of workout
-- Present the activity name before other details like distance, time, etc.
-
-Always be encouraging and supportive while providing evidence-based advice. Remember that continuity and personalization are key to effective coaching.
-"""
+    # o3 models don't support custom temperature settings
+    llm_kwargs = {
+        "api_key": api_key,
+        "model": model,
+    }
     
-    return ChatPromptTemplate.from_messages([
-        ("system", system_message),
-        ("human", "{input}"),
-        ("placeholder", "{agent_scratchpad}"),
-    ])
+    # Only add temperature for models that support it
+    if not model.startswith("o3"):
+        llm_kwargs["temperature"] = 0.1  # Low temperature for more consistent responses
+    
+    return ChatOpenAI(**llm_kwargs)
 
 
 def create_ultra_trainer_agent() -> AgentExecutor:
@@ -452,7 +407,16 @@ def create_ultra_trainer_agent() -> AgentExecutor:
     # Initialize components
     llm = initialize_llm()
     tools = get_all_tools()  # Use all tools (Strava + Data Store)
-    prompt = create_agent_prompt()
+    
+    # Get current location from athlete profile for context
+    store = get_store()
+    profile = store.get_profile()
+    current_location = None
+    if profile:
+        current_location = profile.get('current_location') or profile.get('default_location')
+    
+    # Create agent prompt with location context
+    prompt = create_agent_prompt(current_location=current_location)  
     
     # Ensure Strava client is initialized
     if server.strava_client is None:
