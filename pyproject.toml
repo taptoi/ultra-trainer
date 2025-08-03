@@ -6,10 +6,11 @@ readme = "README.md"
 requires-python = ">=3.11,<4.0"
 license = {text = "MIT"}
 authors = [{name = "Your Name", email = "you@example.com"}]
-dependencies = ["fastmcp (>=2.11.0,<3.0.0)", "httpx (>=0.28.1,<0.29.0)", "python-dotenv (>=1.1.1,<2.0.0)", "mcp (>=1.12.3,<2.0.0)", "langchain (>=0.3.27,<0.4.0)", "langchain-openai (>=0.3.28,<0.4.0)", "langchain-core (>=0.3.72,<0.4.0)", "prompt-toolkit (>=3.0.51,<4.0.0)"]
+dependencies = ["fastmcp (>=2.11.0,<3.0.0)", "httpx (>=0.28.1,<0.29.0)", "python-dotenv (>=1.1.1,<2.0.0)", "mcp (>=1.12.3,<2.0.0)", "langchain (>=0.3.27,<0.4.0)", "langchain-openai (>=0.3.28,<0.4.0)", "langchain-core (>=0.3.72,<0.4.0)", "prompt-toolkit (>=3.0.51,<4.0.0)", "sqlalchemy (>=2.0.42,<3.0.0)", "streamlit (>=1.40.0,<2.0.0)"]
 [project.scripts]
 strava-mcp-server = "ultra_trainer.strava_mcp_server.server:main"
 ultra-trainer = "ultra_trainer.cli:main"
+ultra-trainer-web = "streamlit run ultra_trainer.app:main"
 
 
 [tool.poetry]

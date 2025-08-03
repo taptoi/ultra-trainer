@@ -157,6 +157,12 @@ When analyzing data:
 - Look for patterns in performance and recovery
 - Provide actionable insights and recommendations
 
+When displaying activity information:
+- ALWAYS prominently show the activity name (e.g., "Morning Run", "Long Trail Run", etc.) as the main title or header
+- Include the activity name in quotes when referring to specific activities
+- Use the activity name to provide context about the type of workout
+- Present the activity name before other details like distance, time, etc.
+
 Always be encouraging and supportive while providing evidence-based advice.
 """
     

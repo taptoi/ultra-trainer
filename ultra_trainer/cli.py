@@ -20,6 +20,7 @@ from prompt_toolkit.shortcuts import print_formatted_text
 from prompt_toolkit.styles import Style
 
 from ultra_trainer.agent import get_agent
+from ultra_trainer.context_store import ContextStore
 
 # Load environment variables
 load_dotenv()
@@ -37,7 +38,7 @@ style = Style.from_dict({
 # Command completion
 command_completer = WordCompleter([
     'help', 'exit', 'quit', 'clear', 'history', 'goals', 'profile', 'injury',
-    'fatigue', 'effort', 'training', 'race', 'recovery', 'nutrition'
+    'fatigue', 'effort', 'training', 'race', 'recovery', 'nutrition', 'context', 'episodes'
 ], ignore_case=True)
 
 
@@ -50,6 +51,125 @@ class UltraTrainerCLI:
         self.history = InMemoryHistory()
         self.conversation_context: List[Dict[str, str]] = []
         self.user_profile: Dict[str, str] = {}
+        self.context_store = ContextStore()
+        
+        # Load existing profile from database
+        self._load_profile_from_db()
+        
+    def _load_profile_from_db(self) -> None:
+        """Load athlete profile from database."""
+        try:
+            profile = self.context_store.get_profile()
+            if profile:
+                # Convert database profile to CLI format
+                if profile.get('birth_year'):
+                    age = 2025 - profile['birth_year']  # Calculate current age
+                    self.user_profile['age'] = str(age)
+                
+                if profile.get('weight_kg'):
+                    self.user_profile['weight'] = str(profile['weight_kg'])
+                
+                if profile.get('running_years'):
+                    self.user_profile['running_years'] = str(profile['running_years'])
+                
+                if profile.get('preferred_terrain'):
+                    self.user_profile['preferred_terrain'] = profile['preferred_terrain']
+                
+                if profile.get('weekly_mileage_km'):
+                    self.user_profile['weekly_mileage'] = f"{profile['weekly_mileage_km']} km"
+                
+                if profile.get('ultra_experience'):
+                    self.user_profile['ultra_experience'] = str(profile['ultra_experience'])
+            
+            # Load active goals
+            goals = self.context_store.get_active_goals()
+            if goals:
+                goal = goals[0]  # Use first active goal
+                self.user_profile['goal_race'] = goal.get('event_name', '')
+                if goal.get('event_datetime'):
+                    self.user_profile['goal_date'] = goal['event_datetime'][:10]  # YYYY-MM-DD
+                if goal.get('fitness_level'):
+                    self.user_profile['current_fitness'] = str(goal['fitness_level'])
+                    
+        except Exception as e:
+            self.print_error(f"Warning: Could not load profile from database: {e}")
+    
+    def _save_profile_to_db(self) -> None:
+        """Save current profile to database."""
+        try:
+            # Convert CLI format to database format
+            birth_year = None
+            if self.user_profile.get('age'):
+                try:
+                    birth_year = 2025 - int(self.user_profile['age'])
+                except (ValueError, TypeError):
+                    pass
+            
+            weight_kg = None
+            if self.user_profile.get('weight'):
+                try:
+                    weight_kg = float(self.user_profile['weight'])
+                except (ValueError, TypeError):
+                    pass
+            
+            running_years = None
+            if self.user_profile.get('running_years'):
+                try:
+                    running_years = int(self.user_profile['running_years'])
+                except (ValueError, TypeError):
+                    pass
+            
+            weekly_mileage_km = None
+            if self.user_profile.get('weekly_mileage'):
+                try:
+                    # Extract number from string like "60 km" or "60"
+                    mileage_str = self.user_profile['weekly_mileage'].replace('km', '').strip()
+                    weekly_mileage_km = float(mileage_str)
+                except (ValueError, TypeError):
+                    pass
+            
+            ultra_experience = None
+            if self.user_profile.get('ultra_experience'):
+                try:
+                    ultra_experience = int(self.user_profile['ultra_experience'])
+                except (ValueError, TypeError):
+                    pass
+            
+            # Update profile in database
+            self.context_store.upsert_profile(
+                birth_year=birth_year,
+                weight_kg=weight_kg,
+                running_years=running_years,
+                preferred_terrain=self.user_profile.get('preferred_terrain'),
+                weekly_mileage_km=weekly_mileage_km,
+                ultra_experience=ultra_experience
+            )
+            
+            # Save goal if exists
+            if self.user_profile.get('goal_race'):
+                from datetime import datetime
+                event_datetime = None
+                if self.user_profile.get('goal_date'):
+                    try:
+                        event_datetime = datetime.fromisoformat(self.user_profile['goal_date'])
+                    except ValueError:
+                        pass
+                
+                fitness_level = None
+                if self.user_profile.get('current_fitness'):
+                    try:
+                        fitness_level = int(self.user_profile['current_fitness'])
+                    except (ValueError, TypeError):
+                        pass
+                
+                self.context_store.add_or_update_goal(
+                    event_name=self.user_profile['goal_race'],
+                    event_datetime=event_datetime,
+                    fitness_level=fitness_level
+                )
+                
+        except Exception as e:
+            self.print_error(f"Warning: Could not save profile to database: {e}")
         
     def initialize_agent(self) -> bool:
         """Initialize the training agent."""
@@ -114,6 +234,8 @@ class UltraTrainerCLI:
             ("race", "Discuss race preparation"),
             ("recovery", "Get recovery recommendations"),
             ("nutrition", "Discuss nutrition strategies"),
+            ("context", "Show persistent context summary"),
+            ("episodes", "Show recent episodes (injury, fatigue, etc.)"),
             ("history", "Show conversation history"),
             ("clear", "Clear the screen"),
             ("exit/quit", "Exit the application"),
@@ -141,7 +263,10 @@ class UltraTrainerCLI:
             'ultra_experience': experience
         })
         
-        return f"I want to train for a {goal_race} in {goal_date}. My current fitness level is {current_fitness}/10, I'm running {weekly_mileage} miles per week, and I've completed {experience} ultras. Please analyze my recent Strava activities and create a personalized training plan."
+        # Save to database
+        self._save_profile_to_db()
+        
+        return f"I want to train for a {goal_race} in {goal_date}. My current fitness level is {current_fitness}/10, I'm running {weekly_mileage} per week, and I've completed {experience} ultras. Please analyze my recent Strava activities and create a personalized training plan."
     
     def handle_profile_command(self) -> str:
         """Handle the profile command."""
@@ -159,6 +284,9 @@ class UltraTrainerCLI:
             'preferred_terrain': preferred_terrain
         })
         
+        # Save to database
+        self._save_profile_to_db()
+        
         profile_summary = f"My profile: {age} years old, {weight}kg, {running_years} years of running experience, prefers {preferred_terrain} running."
         return f"{profile_summary} Please take this into account for future recommendations and analyze my recent training."
     
@@ -169,6 +297,18 @@ class UltraTrainerCLI:
         if injury_status.lower() in ['yes', 'y']:
             injury_details = prompt("Please describe your injury and current status: ")
             pain_level = prompt("Pain level (0-10): ")
+            
+            # Log injury episode to database
+            try:
+                severity = int(pain_level) if pain_level.isdigit() else None
+                self.context_store.log_episode(
+                    topic="injury",
+                    narrative=injury_details,
+                    severity=severity
+                )
+            except Exception as e:
+                self.print_error(f"Warning: Could not save injury episode: {e}")
+            
             return f"I currently have an injury: {injury_details}. Pain level is {pain_level}/10. Please provide guidance on training modifications and recovery."
         else:
             return "I'm currently injury-free. Please analyze my training for injury prevention strategies."
@@ -179,12 +319,36 @@ class UltraTrainerCLI:
         sleep_quality = prompt("Recent sleep quality (poor/fair/good/excellent): ")
         stress_level = prompt("Current stress level (low/medium/high): ")
         
+        # Log fatigue episode to database
+        try:
+            severity = int(fatigue_level) if fatigue_level.isdigit() else None
+            narrative = f"Fatigue level: {fatigue_level}/10, Sleep: {sleep_quality}, Stress: {stress_level}"
+            self.context_store.log_episode(
+                topic="fatigue",
+                narrative=narrative,
+                severity=severity
+            )
+        except Exception as e:
+            self.print_error(f"Warning: Could not save fatigue episode: {e}")
+        
         return f"My current fatigue level is {fatigue_level}/10, sleep quality is {sleep_quality}, and stress level is {stress_level}. Please analyze my recent training load and provide recovery recommendations."
     
     def handle_effort_command(self) -> str:
         """Handle the effort command."""
         recent_run_effort = prompt("Rate the perceived effort of your last run (1-10): ")
         effort_trend = prompt("How has your effort been trending? (easier/same/harder): ")
+        
+        # Log effort episode to database
+        try:
+            severity = int(recent_run_effort) if recent_run_effort.isdigit() else None
+            narrative = f"Last run effort: {recent_run_effort}/10, Trend: {effort_trend}"
+            self.context_store.log_episode(
+                topic="effort",
+                narrative=narrative,
+                severity=severity
+            )
+        except Exception as e:
+            self.print_error(f"Warning: Could not save effort episode: {e}")
         
         return f"My last run felt like a {recent_run_effort}/10 effort, and training has been feeling {effort_trend} lately. Please analyze this in context of my recent Strava data."
     
@@ -205,6 +369,12 @@ class UltraTrainerCLI:
             return self.handle_fatigue_command()
         elif command == 'effort':
             return self.handle_effort_command()
+        elif command == 'context':
+            self.show_context_summary()
+            return None
+        elif command == 'episodes':
+            self.show_episodes()
+            return None
         elif command == 'history':
             self.show_conversation_history()
             return None
@@ -217,28 +387,152 @@ class UltraTrainerCLI:
         
         return user_input
     
-    def show_conversation_history(self) -> None:
-        """Show conversation history."""
-        if not self.conversation_context:
-            self.print_system("No conversation history yet.")
-            return
-        
-        self.print_subheader("Conversation History:")
-        for i, exchange in enumerate(self.conversation_context[-5:], 1):  # Show last 5 exchanges
-            print_formatted_text(f"<user>{i}. You:</user> {exchange['user']}", style=style)
-            print_formatted_text(f"<agent>   Coach:</agent> {exchange['agent'][:100]}...", style=style)
-        print()
+    def show_context_summary(self) -> None:
+        """Show persistent context summary from database."""
+        try:
+            context_summary = self.context_store.get_context_summary()
+            
+            self.print_subheader("📊 Persistent Context Summary:")
+            
+            # Show profile
+            if context_summary.get('profile'):
+                profile = context_summary['profile']
+                print_formatted_text("<subheader>👤 Profile:</subheader>", style=style)
+                if profile.get('birth_year'):
+                    age = 2025 - profile['birth_year']
+                    print_formatted_text(f"  Age: {age}")
+                if profile.get('weight_kg'):
+                    print_formatted_text(f"  Weight: {profile['weight_kg']}kg")
+                if profile.get('running_years'):
+                    print_formatted_text(f"  Running Experience: {profile['running_years']} years")
+                if profile.get('preferred_terrain'):
+                    print_formatted_text(f"  Preferred Terrain: {profile['preferred_terrain']}")
+                if profile.get('weekly_mileage_km'):
+                    print_formatted_text(f"  Weekly Mileage: {profile['weekly_mileage_km']}km")
+                if profile.get('ultra_experience'):
+                    print_formatted_text(f"  Ultra Experience: {profile['ultra_experience']} races")
+                print()
+            
+            # Show goals
+            if context_summary.get('active_goals'):
+                print_formatted_text("<subheader>🎯 Active Goals:</subheader>", style=style)
+                for goal in context_summary['active_goals'][:3]:
+                    goal_text = f"  • {goal['event_name']}"
+                    if goal.get('distance_km'):
+                        goal_text += f" ({goal['distance_km']}km)"
+                    if goal.get('event_datetime'):
+                        goal_text += f" - {goal['event_datetime'][:10]}"
+                    if goal.get('fitness_level'):
+                        goal_text += f" (fitness: {goal['fitness_level']}/10)"
+                    print_formatted_text(goal_text)
+                print()
+            
+            # Show current episodes
+            if context_summary.get('current_episodes'):
+                print_formatted_text("<subheader>⚠️  Current Episodes:</subheader>", style=style)
+                for episode in context_summary['current_episodes'][:5]:
+                    episode_text = f"  • {episode['topic'].title()}"
+                    if episode.get('severity'):
+                        episode_text += f" (severity: {episode['severity']}/10)"
+                    episode_text += f": {episode['narrative_text'][:60]}..."
+                    print_formatted_text(episode_text)
+                print()
+            
+        except Exception as e:
+            self.print_error(f"Could not load context summary: {e}")
+    
+    def show_episodes(self) -> None:
+        """Show recent episodes from database."""
+        try:
+            episodes = self.context_store.get_recent_episodes(days=30)
+            
+            if not episodes:
+                self.print_system("No episodes recorded in the last 30 days.")
+                return
+            
+            self.print_subheader("📋 Recent Episodes (last 30 days):")
+            
+            # Group by topic
+            topics = {}
+            for episode in episodes:
+                topic = episode['topic']
+                if topic not in topics:
+                    topics[topic] = []
+                topics[topic].append(episode)
+            
+            for topic, topic_episodes in topics.items():
+                print_formatted_text(f"<subheader>{topic.title()}:</subheader>", style=style)
+                for episode in topic_episodes[:3]:  # Show max 3 per topic
+                    status = "Ongoing" if not episode.get('end_date') else "Resolved"
+                    severity_text = f" (severity: {episode['severity']}/10)" if episode.get('severity') else ""
+                    date_text = episode['start_date'][:10] if episode.get('start_date') else "Unknown"
+                    
+                    print_formatted_text(f"  • [{status}] {date_text}{severity_text}")
+                    print_formatted_text(f"    {episode['narrative_text'][:80]}...")
+                print()
+                
+        except Exception as e:
+            self.print_error(f"Could not load episodes: {e}")
     
     def add_context_to_prompt(self, user_input: str) -> str:
-        """Add context to the user prompt."""
+        """Add context to the user prompt using database and conversation history."""
         context_parts = []
         
-        # Add user profile context
-        if self.user_profile:
-            profile_str = " | ".join([f"{k}: {v}" for k, v in self.user_profile.items() if v])
-            context_parts.append(f"My profile: {profile_str}")
+        # Add user profile context from database
+        try:
+            context_summary = self.context_store.get_context_summary()
+            
+            # Add profile information
+            if context_summary.get('profile'):
+                profile = context_summary['profile']
+                profile_items = []
+                if profile.get('birth_year'):
+                    age = 2025 - profile['birth_year']
+                    profile_items.append(f"age: {age}")
+                if profile.get('weight_kg'):
+                    profile_items.append(f"weight: {profile['weight_kg']}kg")
+                if profile.get('running_years'):
+                    profile_items.append(f"running experience: {profile['running_years']} years")
+                if profile.get('preferred_terrain'):
+                    profile_items.append(f"preferred terrain: {profile['preferred_terrain']}")
+                if profile.get('weekly_mileage_km'):
+                    profile_items.append(f"weekly mileage: {profile['weekly_mileage_km']}km")
+                if profile.get('ultra_experience'):
+                    profile_items.append(f"ultra experience: {profile['ultra_experience']} races")
+                
+                if profile_items:
+                    context_parts.append(f"My profile: {' | '.join(profile_items)}")
+            
+            # Add active goals
+            if context_summary.get('active_goals'):
+                goals = context_summary['active_goals']
+                for goal in goals[:2]:  # Limit to 2 most recent goals
+                    goal_info = f"Goal: {goal['event_name']}"
+                    if goal.get('distance_km'):
+                        goal_info += f" ({goal['distance_km']}km)"
+                    if goal.get('event_datetime'):
+                        goal_info += f" on {goal['event_datetime'][:10]}"
+                    if goal.get('fitness_level'):
+                        goal_info += f" (current fitness: {goal['fitness_level']}/10)"
+                    context_parts.append(goal_info)
+            
+            # Add current episodes (injuries, fatigue, etc.)
+            if context_summary.get('current_episodes'):
+                episodes = context_summary['current_episodes']
+                for episode in episodes[:3]:  # Limit to 3 most recent
+                    episode_info = f"Current {episode['topic']}"
+                    if episode.get('severity'):
+                        episode_info += f" (severity: {episode['severity']}/10)"
+                    episode_info += f": {episode['narrative_text'][:50]}..."
+                    context_parts.append(episode_info)
         
-        # Add recent conversation context
+        except Exception as e:
+            # Fallback to in-memory profile if database fails
+            if self.user_profile:
+                profile_str = " | ".join([f"{k}: {v}" for k, v in self.user_profile.items() if v])
+                context_parts.append(f"My profile: {profile_str}")
+        
+        # Add recent conversation context from memory (keep this for immediate context)
         if self.conversation_context:
             recent_context = self.conversation_context[-2:]  # Last 2 exchanges
             for exchange in recent_context:
@@ -260,13 +554,20 @@ class UltraTrainerCLI:
             response = self.agent.invoke({"input": enhanced_prompt})
             agent_output = response.get("output", "I'm sorry, I couldn't process that request.")
             
-            # Store in conversation context
+            # Store in conversation context (memory)
             self.conversation_context.append({
                 "user": user_input,
                 "agent": agent_output
             })
             
-            # Keep only last 10 exchanges to manage memory
+            # Store in database
+            try:
+                self.context_store.add_convo_turn("user", user_input)
+                self.context_store.add_convo_turn("agent", agent_output)
+            except Exception as e:
+                self.print_error(f"Warning: Could not save conversation to database: {e}")
+            
+            # Keep only last 10 exchanges in memory to manage memory
             if len(self.conversation_context) > 10:
                 self.conversation_context = self.conversation_context[-10:]
             

@@ -125,20 +125,26 @@ class StravaClient:
         # Define field mappings with units
         field_mappings = {
             "id": "id",  # Keep activity ID for reference
+            "city": "city",
+            "country": "country",
             "calories": "calories",
             "distance": "distance_metres",
             "elapsed_time": "elapsed_time_seconds",
             "elev_high": "elev_high_metres",
             "elev_low": "elev_low_metres",
+            "total_elevation_gain": "total_elevation_gain_metres",
             "end_latlng": "end_latlng",
             "average_speed": "average_speed_mps",  # metres per second
             "max_speed": "max_speed_mps",  # metres per second
+            "average_temp": "average_temp_celsius",  # Celsius
             "moving_time": "moving_time_seconds",
             "sport_type": "sport_type",
             "start_date": "start_date",
             "start_latlng": "start_latlng",
             "total_elevation_gain": "total_elevation_gain_metres",
             "name": "name",  # Keep name for display purposes
+            "average_heartrate": "average_heartrate_bpm",  # beats per minute
+            "suffer_score": "suffer_score"
         }
 
         # Create a new dictionary with renamed fields
@@ -147,7 +153,36 @@ class StravaClient:
             if old_key in activity:
                 filtered_activity[new_key] = activity[old_key]
 
+        # Calculate pace from speed (minutes:seconds per kilometer)
+        if "average_speed" in activity and activity["average_speed"] is not None and activity["average_speed"] > 0:
+            filtered_activity["average_pace_min_per_km"] = self._speed_to_pace(activity["average_speed"])
+        
+        if "max_speed" in activity and activity["max_speed"] is not None and activity["max_speed"] > 0:
+            filtered_activity["max_pace_min_per_km"] = self._speed_to_pace(activity["max_speed"])
+
         return filtered_activity
+
+    def _speed_to_pace(self, speed_mps: float) -> str:
+        """
+        Convert speed in meters per second to pace in minutes:seconds per kilometer.
+        
+        Args:
+            speed_mps: Speed in meters per second
+            
+        Returns:
+            Pace as a string in format "MM:SS" (minutes:seconds per kilometer)
+        """
+        if speed_mps <= 0:
+            return "00:00"
+        
+        # Calculate seconds per kilometer
+        seconds_per_km = 1000 / speed_mps
+        
+        # Convert to minutes and seconds
+        minutes = int(seconds_per_km // 60)
+        seconds = int(seconds_per_km % 60)
+        
+        return f"{minutes:02d}:{seconds:02d}"
 
     def _filter_activities(self, activities: list) -> list:
         """Filter a list of activities to only include specific keys with units."""
