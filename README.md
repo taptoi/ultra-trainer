@@ -9,7 +9,18 @@ This project uses [Poetry](https://python-poetry.org/) for dependency management
    ```bash
    poetry install
    ```
-2. Create a `.env` file based on `.env.template` and fill in the required values.
+
+2. Set up Strava API access:
+   - Create a Strava API application at https://www.strava.com/settings/api
+   - Note your Client ID and Client Secret
+   - Run the token helper script:
+     ```bash
+     poetry run python get_strava_token.py
+     ```
+   - Follow the prompts to authorize the application and get your tokens
+   - The script will automatically create/update your `.env` file with the required credentials
+
+   Required Strava API scopes: `read`, `activity:read`, `activity:read_all`, `profile:read_all`
 
 ## Strava MCP server
 
