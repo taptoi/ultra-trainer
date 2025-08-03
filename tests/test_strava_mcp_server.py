@@ -30,10 +30,9 @@ def test_get_activities_returns_data() -> None:
     ]
 
     if missing:
+        skip_reason = f"Strava credentials not configured: missing {', '.join(missing)}"
         logging.warning("Missing Strava env vars: %s", ", ".join(missing))
-        pytest.skip(
-            "Strava credentials not configured: missing " + ", ".join(missing)
-        )
+        pytest.skip(skip_reason)
 
     server.strava_client = server.StravaClient(
         refresh_token, client_id, client_secret

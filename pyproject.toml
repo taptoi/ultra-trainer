@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11,<4.0"
 license = {text = "MIT"}
 authors = [{name = "Your Name", email = "you@example.com"}]
-dependencies = ["fastmcp (>=2.11.0,<3.0.0)", "httpx (>=0.28.1,<0.29.0)", "python-dotenv (>=1.1.1,<2.0.0)"]
+dependencies = ["fastmcp (>=2.11.0,<3.0.0)", "httpx (>=0.28.1,<0.29.0)", "python-dotenv (>=1.1.1,<2.0.0)", "mcp (>=1.12.3,<2.0.0)"]
 [project.scripts]
 strava-mcp-server = "ultra_trainer.strava_mcp_server.server:main"
 
