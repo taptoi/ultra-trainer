@@ -60,7 +60,6 @@ class Goal(Base):
     event_datetime = Column(DateTime(timezone=True))
     context_text = Column(Text)
     target_time_seconds = Column(Integer)
-    fitness_level = Column(Integer)  # 1-10 scale
     created_at = Column(DateTime(timezone=True), default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
 
@@ -178,8 +177,7 @@ class ContextStore:
         distance_km: Optional[float] = None,
         event_datetime: Optional[datetime] = None,
         context_text: Optional[str] = None,
-        target_time_seconds: Optional[int] = None,
-        fitness_level: Optional[int] = None
+        target_time_seconds: Optional[int] = None
     ) -> int:
         """Add new goal or update existing goal. Returns goal_id."""
         with self._get_session() as session:
@@ -204,8 +202,6 @@ class ContextStore:
                 goal.context_text = context_text
             if target_time_seconds is not None:
                 goal.target_time_seconds = target_time_seconds
-            if fitness_level is not None:
-                goal.fitness_level = fitness_level
             
             session.commit()
             session.refresh(goal)
@@ -227,12 +223,32 @@ class ContextStore:
                     "event_datetime": goal.event_datetime.isoformat() if goal.event_datetime else None,
                     "context_text": goal.context_text,
                     "target_time_seconds": goal.target_time_seconds,
-                    "fitness_level": goal.fitness_level,
                     "created_at": goal.created_at.isoformat() if goal.created_at else None,
                     "updated_at": goal.updated_at.isoformat() if goal.updated_at else None
                 }
                 for goal in goals
             ]
+    
+    def remove_goal(self, goal_id: Optional[int] = None, event_name: Optional[str] = None) -> bool:
+        """
+        Remove a goal by ID or event name.
+        Returns True if a goal was removed, False otherwise.
+        """
+        with self._get_session() as session:
+            query = session.query(Goal)
+            
+            if goal_id is not None:
+                goal = query.filter(Goal.goal_id == goal_id).first()
+            elif event_name is not None:
+                goal = query.filter(Goal.event_name == event_name).first()
+            else:
+                return False
+            
+            if goal:
+                session.delete(goal)
+                session.commit()
+                return True
+            return False
     
     # ------ Episode Methods ------
     

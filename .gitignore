@@ -205,3 +205,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# SQLite database files (contain user-specific training data)
+ultra_trainer.db
+ultra_trainer.db-journal
+ultra_trainer.db-wal
+ultra_trainer.db-shm
