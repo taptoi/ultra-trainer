@@ -124,6 +124,7 @@ class StravaClient:
         """Filter activity to only include specific keys and rename with units."""
         # Define field mappings with units
         field_mappings = {
+            "id": "id",  # Keep activity ID for reference
             "calories": "calories",
             "distance": "distance_metres",
             "elapsed_time": "elapsed_time_seconds",
