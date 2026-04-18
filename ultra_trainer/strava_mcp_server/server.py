@@ -133,15 +133,15 @@ class StravaClient:
             "elev_high": "elev_high_metres",
             "elev_low": "elev_low_metres",
             "total_elevation_gain": "total_elevation_gain_metres",
-            "end_latlng": "end_latlng",
             "average_speed": "average_speed_mps",  # metres per second
             "max_speed": "max_speed_mps",  # metres per second
             "average_temp": "average_temp_celsius",  # Celsius
             "moving_time": "moving_time_seconds",
+            "laps": "laps",
             "sport_type": "sport_type",
             "start_date": "start_date",
             "start_latlng": "start_latlng",
-            "total_elevation_gain": "total_elevation_gain_metres",
+            "end_latlng": "end_latlng",
             "name": "name",  # Keep name for display purposes
             "average_heartrate": "average_heartrate_bpm",  # beats per minute
             "suffer_score": "suffer_score"
@@ -151,7 +151,11 @@ class StravaClient:
         filtered_activity = {}
         for old_key, new_key in field_mappings.items():
             if old_key in activity:
-                filtered_activity[new_key] = activity[old_key]
+                if old_key == "laps" and activity[old_key] is not None:
+                    # Filter laps to only include specific fields
+                    filtered_activity[new_key] = self._filter_laps(activity[old_key])
+                else:
+                    filtered_activity[new_key] = activity[old_key]
 
         # Calculate pace from speed (minutes:seconds per kilometer)
         if "average_speed" in activity and activity["average_speed"] is not None and activity["average_speed"] > 0:
@@ -161,6 +165,27 @@ class StravaClient:
             filtered_activity["max_pace_min_per_km"] = self._speed_to_pace(activity["max_speed"])
 
         return filtered_activity
+
+    def _filter_laps(self, laps: list) -> list:
+        """Filter laps to only include specific fields."""
+        lap_fields = [
+            "lap_index",
+            "average_speed",
+            "elapsed_time",
+            "distance",
+            "total_elevation_gain",
+            "average_heartrate"
+        ]
+        
+        filtered_laps = []
+        for lap in laps:
+            filtered_lap = {}
+            for field in lap_fields:
+                if field in lap:
+                    filtered_lap[field] = lap[field]
+            filtered_laps.append(filtered_lap)
+        
+        return filtered_laps
 
     def _speed_to_pace(self, speed_mps: float) -> str:
         """
