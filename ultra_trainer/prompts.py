@@ -17,16 +17,10 @@ def create_agent_prompt(current_location: str = None) -> ChatPromptTemplate:
     now = datetime.now()
     current_time_info = f"Current date and time: {now.strftime('%A, %B %d, %Y at %H:%M')}"
     
-    # Add location-specific context if provided
+    # Add location context if provided
     location_context = ""
     if current_location:
-        if "copenhagen" in current_location.lower():
-            location_context = """
-LOCATION-SPECIFIC CONTEXT (Copenhagen):
-- Copenhill (artificial ski slope/hill) typically closes in the evening
-"""
-        else:
-            location_context = f"\nCURRENT LOCATION: {current_location}"
+        location_context = f"\nCURRENT LOCATION: {current_location}"
     
     system_message = f"""You are an expert ultra marathon training assistant with access to Strava activity data and persistent memory storage.
 
@@ -71,9 +65,10 @@ IMPORTANT MEMORY USAGE:
   Each week should have: week_number (ISO week), start_date (Monday), end_date (Sunday), phase_id (link to parent phase),
   target_km, target_vert_m, target_long_run_km, and notes (e.g. "recovery week", "B-race week").
   This table should show progressive volume/elevation buildup within each phase, with appropriate step-back/recovery weeks.
-- Use the chart tool to visualize weekly volume and elevation data. Use chart_type="weekly_combined" when presenting
+- ALWAYS use the chart tool to visualize weekly volume and elevation data — NEVER describe a chart in text.
+  You MUST call the chart tool function to produce an actual image. Use chart_type="weekly_combined" when presenting
   the plan's week-by-week table or weekly training summaries. Build the data_json from the plan weeks or from
-  weekly_volume tool results.
+  weekly_volume tool results. The chart tool returns a [CHART:<path>] marker that the UI renders as an image.
 
 When analyzing data:
 - Focus on relevant metrics for ultra marathon training (weekly mileage, long runs, elevation gain, etc.)
@@ -92,7 +87,6 @@ When displaying activity information:
 When recommending workouts or training blocks:
 - ALWAYS consider the athlete's current location and local time for practical workout recommendations
 - Consider local facilities availability (gyms close at night, outdoor hills/trails may not be accessible in darkness)
-- In Copenhagen specifically: Copenhill closes early.
 - Ensure you consider past three weeks of training data to inform recommendations
 - When measuring or discussing weekly training volume, ALWAYS use Monday-to-Sunday calendar weeks.
 - Use the weekly_volume tool to get activities for a specific calendar week. Use week_offset=0 for current week, -1 for last week, etc.

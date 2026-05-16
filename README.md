@@ -24,7 +24,15 @@ This project uses [Poetry](https://python-poetry.org/) for dependency management
 
    Required Strava API scopes: `read`, `activity:read`, `activity:read_all`, `profile:read_all`
 
-3. Set up OpenAI API access:
+3. Configure your location (optional):
+   - Set `USER_LOCATION` in your `.env` file as a fallback default location:
+     ```
+     USER_LOCATION=Copenhagen, Denmark
+     ```
+   - The location is primarily stored in your athlete profile (set via chat). This env var is used only if no profile location is set.
+   - Location is used to tailor workout recommendations to local time and facilities.
+
+4. Set up OpenAI API access:
    - Get an API key from https://platform.openai.com/
    - Add it to your `.env` file:
      ```

@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 import streamlit as st
 from dotenv import load_dotenv
 
-from ultra_trainer.agent import get_agent, initialize_llm
+from ultra_trainer.agent import get_agent, get_available_models, initialize_llm
 from ultra_trainer.context_store import ContextStore
 
 # Load environment variables
@@ -24,8 +24,28 @@ load_dotenv()
 _CHART_RE = re.compile(r"\[CHART:([^\]]+)\]")
 
 
-def render_message(content: str):
+def _normalize_content(content) -> str:
+    """Normalize LLM output to a plain string.
+
+    Anthropic models may return content as a list of content blocks
+    (e.g. [{"type": "text", "text": "..."}]) instead of a plain string.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(parts)
+    return str(content)
+
+
+def render_message(content):
     """Render a message, replacing [CHART:<path>] markers with images."""
+    content = _normalize_content(content)
     parts = _CHART_RE.split(content)
     for i, part in enumerate(parts):
         if i % 2 == 0:
@@ -54,8 +74,10 @@ Include:
 
 Keep it short and factual. No recommendations. No commentary.""",
     "Weekly Progression Chart": """Present a chart for the weekly volume and elevation progression \
-for the past 5 weeks and leading up to the training plan end. Use the chart tool with chart_type="weekly_combined". \
-Use ISO week format "W13" style for the week labels (not dates).""",
+for the past 5 weeks and leading up to the training plan end. You MUST call the chart tool function with \
+chart_type="weekly_combined" to produce an actual image — do NOT describe the chart in text. \
+Use ISO week format "W13" style for the week labels (not dates). After displaying the chart, add a brief \
+commentary on what stands out.""",
     "Training Plan": """Show the current training plan with all phases and the week-by-week volume table.""",
     "This Week's Plan": """What should I focus on this week? Consider my current training plan phase, \
 recent volume, fatigue/injury status, and upcoming goals. Provide specific workout suggestions.""",
@@ -118,7 +140,7 @@ def generate_and_save_summary(messages, session_id, started_at):
     turn_count = sum(1 for m in convo_messages if m["role"] == "user")
 
     try:
-        llm = initialize_llm()
+        llm = initialize_llm(st.session_state.get("selected_model"))
 
         short_resp = llm.invoke(
             f"Summarize this coaching conversation in 1-2 sentences. Focus on key topics, "
@@ -142,10 +164,10 @@ def generate_and_save_summary(messages, session_id, started_at):
         st.warning(f"Could not save conversation summary: {e}")
 
 
-def initialize_agent():
+def initialize_agent(model: str | None = None):
     """Initialize the training agent."""
     try:
-        return get_agent()
+        return get_agent(model)
     except Exception as e:
         st.error(f"Failed to initialize agent: {e}")
         st.error("Please check your environment variables and configuration.")
@@ -166,18 +188,23 @@ def main():
     st.subheader("Your AI Ultra Marathon Training Coach")
     
     # Check environment variables
-    required_vars = ['OPENAI_API_KEY', 'STRAVA_CLIENT_ID', 'STRAVA_CLIENT_SECRET', 'STRAVA_REFRESH_TOKEN']
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
-    
-    if missing_vars:
-        st.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+    strava_vars = ['STRAVA_CLIENT_ID', 'STRAVA_CLIENT_SECRET', 'STRAVA_REFRESH_TOKEN']
+    missing_strava = [var for var in strava_vars if not os.getenv(var)]
+    has_llm_key = os.getenv("OPENAI_API_KEY") or os.getenv("CLAUDE_API_KEY")
+
+    if missing_strava or not has_llm_key:
+        missing = missing_strava + (["OPENAI_API_KEY or CLAUDE_API_KEY"] if not has_llm_key else [])
+        st.error(f"Missing required environment variables: {', '.join(missing)}")
         st.error("Please set up your .env file with the required credentials.")
         st.stop()
     
     # Initialize agent
     if "agent" not in st.session_state:
+        # Pick default model from env
+        default_model = os.getenv("OPENAI_MODEL", "gpt-5.5") if os.getenv("OPENAI_API_KEY") else os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
+        st.session_state.selected_model = default_model
         with st.spinner("Initializing AI coach..."):
-            st.session_state.agent = initialize_agent()
+            st.session_state.agent = initialize_agent(default_model)
             if st.session_state.agent is None:
                 st.stop()
     
@@ -222,9 +249,9 @@ def main():
                         enhanced_prompt = f"{history}\n\n{enhanced_prompt}"
                     
                     response = st.session_state.agent.invoke({"input": enhanced_prompt})
-                    agent_output = response.get("output", "I'm sorry, I couldn't process that request.")
+                    agent_output = _normalize_content(response.get("output", "I'm sorry, I couldn't process that request."))
                     render_message(agent_output)
-                    
+
                     # Add assistant response to chat history
                     st.session_state.messages.append({"role": "assistant", "content": agent_output})
                     
@@ -233,8 +260,37 @@ def main():
                     st.error(error_msg)
                     st.session_state.messages.append({"role": "assistant", "content": error_msg})
     
-    # Sidebar with quick commands
+    # Sidebar with model selector and quick commands
     with st.sidebar:
+        # Model selector
+        available = get_available_models()
+        if available:
+            # Build flat list: "Provider / Display Name" -> model_id
+            model_options = {}
+            for provider, models in available.items():
+                for model_id, display in models.items():
+                    model_options[f"{provider} / {display}"] = model_id
+
+            # Determine default selection
+            current_model = st.session_state.get("selected_model")
+            labels = list(model_options.keys())
+            default_idx = 0
+            if current_model:
+                for i, label in enumerate(labels):
+                    if model_options[label] == current_model:
+                        default_idx = i
+                        break
+
+            chosen_label = st.selectbox("Model", labels, index=default_idx)
+            chosen_model = model_options[chosen_label]
+
+            if chosen_model != st.session_state.get("selected_model"):
+                st.session_state.selected_model = chosen_model
+                with st.spinner(f"Switching to {chosen_label}..."):
+                    st.session_state.agent = get_agent(chosen_model)
+                st.rerun()
+
+        st.divider()
         st.header("Quick Commands")
         for label in QUICK_COMMANDS:
             if st.button(label, use_container_width=True):
@@ -242,7 +298,7 @@ def main():
                 st.rerun()
 
         st.divider()
-        if st.button("Clear Chat", use_container_width=True):
+        if st.button("Save Summary & Clear Chat", use_container_width=True):
             # Save conversation summary before clearing
             if len(st.session_state.messages) > 1:
                 with st.spinner("Saving conversation summary..."):
@@ -274,7 +330,7 @@ def main():
                     if history:
                         enhanced_prompt = f"{history}\n\n{enhanced_prompt}"
                     response = st.session_state.agent.invoke({"input": enhanced_prompt})
-                    agent_output = response.get("output", "I'm sorry, I couldn't process that request.")
+                    agent_output = _normalize_content(response.get("output", "I'm sorry, I couldn't process that request."))
                     render_message(agent_output)
                     st.session_state.messages.append({"role": "assistant", "content": agent_output})
                 except Exception as e:

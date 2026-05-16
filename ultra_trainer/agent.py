@@ -13,9 +13,10 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Type, Optional
 
 from dotenv import load_dotenv
-from langchain.agents import AgentExecutor, create_openai_tools_agent
+from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.tools import BaseTool, tool
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
@@ -739,33 +740,79 @@ def get_all_tools() -> List:
     return get_strava_tools() + get_datastore_tools()
 
 
-def initialize_llm() -> ChatOpenAI:
-    """Initialize the OpenAI LLM client."""
+AVAILABLE_MODELS = {
+    "OpenAI": {
+        "gpt-5.5": "GPT-5.5",
+        "gpt-5.4": "GPT-5.4",
+        "gpt-5.4-mini": "GPT-5.4 Mini",
+        "gpt-5.4-nano": "GPT-5.4 Nano",
+        "gpt-5": "GPT-5",
+        "o3": "o3",
+        "o3-mini": "o3-mini",
+    },
+    "Anthropic": {
+        "claude-opus-4-7": "Claude Opus 4.7",
+        "claude-opus-4-6": "Claude Opus 4.6",
+        "claude-sonnet-4-6": "Claude Sonnet 4.6",
+        "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
+    },
+}
+
+
+def get_provider_for_model(model: str) -> str:
+    """Return 'openai' or 'anthropic' based on model name."""
+    if model.startswith("claude"):
+        return "anthropic"
+    return "openai"
+
+
+def get_available_models() -> dict:
+    """Return available models filtered by which API keys are configured."""
+    available = {}
+    if os.getenv("OPENAI_API_KEY"):
+        available["OpenAI"] = AVAILABLE_MODELS["OpenAI"]
+    if os.getenv("CLAUDE_API_KEY"):
+        available["Anthropic"] = AVAILABLE_MODELS["Anthropic"]
+    return available
+
+
+def initialize_llm(model: str | None = None):
+    """Initialize the LLM client for the given model."""
+    if model is None:
+        model = os.getenv("OPENAI_MODEL", "gpt-5.5")
+
+    provider = get_provider_for_model(model)
+
+    if provider == "anthropic":
+        api_key = os.getenv("CLAUDE_API_KEY")
+        if not api_key:
+            raise ValueError("CLAUDE_API_KEY environment variable is required for Anthropic models")
+        return ChatAnthropic(
+            api_key=api_key,
+            model=model,
+            temperature=0.1,
+            max_tokens=4096,
+        )
+
+    # OpenAI
     api_key = os.getenv("OPENAI_API_KEY")
-    model = os.getenv("OPENAI_MODEL", "gpt-4o")
-    
     if not api_key:
-        raise ValueError("OPENAI_API_KEY environment variable is required")
-    
-    # o3 models don't support custom temperature settings
-    llm_kwargs = {
-        "api_key": api_key,
-        "model": model,
-    }
-    
-    # Only add temperature for models that support it
+        raise ValueError("OPENAI_API_KEY environment variable is required for OpenAI models")
+
+    llm_kwargs = {"api_key": api_key, "model": model}
+
     if model.startswith("gpt-5"):
         llm_kwargs["temperature"] = 1
     elif not model.startswith("o3"):
-        llm_kwargs["temperature"] = 0.1  # Low temperature for more consistent responses
-    
+        llm_kwargs["temperature"] = 0.1
+
     return ChatOpenAI(**llm_kwargs)
 
 
-def create_ultra_trainer_agent() -> AgentExecutor:
+def create_ultra_trainer_agent(model: str | None = None) -> AgentExecutor:
     """Create and return the configured ultra trainer agent."""
     # Initialize components
-    llm = initialize_llm()
+    llm = initialize_llm(model)
     tools = get_all_tools()  # Use all tools (Strava + Data Store)
     
     # Get current location from athlete profile for context
@@ -774,6 +821,8 @@ def create_ultra_trainer_agent() -> AgentExecutor:
     current_location = None
     if profile:
         current_location = profile.get('current_location') or profile.get('default_location')
+    if not current_location:
+        current_location = os.getenv("USER_LOCATION")
     
     # Create agent prompt with location context
     prompt = create_agent_prompt(current_location=current_location)  
@@ -795,7 +844,7 @@ def create_ultra_trainer_agent() -> AgentExecutor:
         )
     
     # Create the agent
-    agent = create_openai_tools_agent(llm, tools, prompt)
+    agent = create_tool_calling_agent(llm, tools, prompt)
     
     # Create and return the agent executor
     return AgentExecutor(
@@ -807,9 +856,9 @@ def create_ultra_trainer_agent() -> AgentExecutor:
     )
 
 
-def get_agent() -> AgentExecutor:
+def get_agent(model: str | None = None) -> AgentExecutor:
     """Get a configured ultra trainer agent instance."""
-    return create_ultra_trainer_agent()
+    return create_ultra_trainer_agent(model)
 
 
 if __name__ == "__main__":
